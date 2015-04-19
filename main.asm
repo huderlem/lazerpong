@@ -77,15 +77,20 @@ Start: ; 0x150
     call LoadTiles
     ld a, %11100100
     ld [rBGP], a  ; Set Background palette
+    ld [rOBP0], a ; Set Sprite Palette 0
+    ld [rOBP1], a ; Set Sprite Palette 1
 
     call ClearOAMBuffer
     call ClearBackground
 
     ld sp, $dfff  ; Initialize stack pointer to end of working RAM
 
-    call InitPlayerPaddle
+    call WriteDMACodeToHRAM
 
-    ld a, $91
+    call InitPlayerPaddle
+    call InitBall
+
+    ld a, $93
     ld [rLCDC], a   ; Enable LCD Display
     ld a,%00000001  ; Enable V-blank interrupt
     ld [rIE], a
@@ -99,6 +104,9 @@ VBlankInterruptHandler:
     push hl
     call ReadJoypad
     call DrawPlayerPaddle
+    ; Draw OAM sprites
+    call DrawBall
+    call $ff80  ; OAM DMA transfer
     ld a, 1
     ld [VBlankFlag], a
     pop hl
@@ -113,6 +121,29 @@ TimerInterruptHandler:
 SerialInterruptHandler:
     reti
 
+; copies DMA routine to HRAM. By GB specifications, all DMA needs to be done in HRAM (no other memory section is available during DMA)
+; This routine is taken from Pokemon Red Version.
+WriteDMACodeToHRAM: ; 4bed (1:4bed)
+    ld c, $80
+    ld b, $a
+    ld hl, DMARoutine
+.copyLoop
+    ld a, [hli]
+    ld [$ff00+c], a
+    inc c
+    dec b
+    jr nz, .copyLoop
+    ret
+
+DMARoutine: ; 4bfb (1:4bfb)
+    ld a, (wOAMBuffer >> 8)
+    ld [$ff00+$46], a   ; start DMA
+    ld a, $28
+.waitLoop               ; wait for DMA to finish
+    dec a
+    jr nz, .waitLoop
+    ret
+
 ClearData:
 ; Clears bc bytes starting at hl with value in a.
 ; bc can be a maximum of $7fff, since it checks bit 7 of b when looping.
@@ -124,14 +155,25 @@ ClearData:
     jr z, .clearLoop
     ret
 
-ClearOAMBuffer::
+CopyData:
+; Copies bc bytes starting at hl to de.
+    ld a, [hli]
+    ld [de], a
+    inc de
+    dec bc
+    ld a, b
+    or c  ; have we copied all of the data?
+    jr nz, CopyData
+    ret
+
+ClearOAMBuffer:
 ; Fills OAM buffer memory with $0.
     xor a
     ld hl, wOAMBuffer
     ld bc, $a0  ; size of OAM buffer
     jp ClearData
 
-ClearBackground::
+ClearBackground:
 ; Fills Background memory with $1.
     ld a, 1
     ld hl, vBGMap0
@@ -256,6 +298,179 @@ DrawPlayerPaddle:
 .done
     ret
 
+InitBall:
+; Initializes the Pong ball
+    ld hl, wBallY
+    xor a
+    ld [hli], a
+    ld a, BASE_BALL_Y_POSITION
+    ld [hli], a
+    xor a
+    ld [hli], a
+    ld a, BASE_BALL_X_POSITION
+    ld [hli], a
+    ld a, (BASE_BALL_Y_SPEED & $ff)
+    ld [hli], a
+    ld a, (BASE_BALL_Y_SPEED >> 8)
+    ld [hli], a
+    ld a, (BASE_BALL_X_SPEED & $ff)
+    ld [hli], a
+    ld a, (BASE_BALL_X_SPEED >> 8)
+    ld [hl], a
+    ret
+
+DrawBall:
+; Draws the Pong ball sprite to OAM.
+    ld hl, wBallSprite
+    ld a, [wBallY + 1]
+    add 16 - 4  ; Add 16 to adjust for the screen offset for sprites.
+    ld [hli], a
+    ld a, [wBallX + 1]
+    add 8 - 4  ; Add 8 to adjust for the screen offset for sprites.
+    ld [hli], a
+    ld a, $0  ; tile id for ball's sprite
+    ld [hli], a
+    ld a, %10000000
+    ld [hl], a
+    ret
+
+MoveBall:
+; Updates the ball's position according to its speed.
+    call UpdateBallYPosition
+    call UpdateBallXPosition
+    ret
+
+UpdateBallYPosition:
+    ld a, [wBallY]
+    ld l, a
+    ld a, [wBallY + 1]
+    ld h, a  ; hl contains ball's y position
+    ld a, [wBallYSpeed]
+    ld c, a
+    ld a, [wBallYSpeed + 1]
+    ld b, a  ; bc contains ball's y speed
+    cp $80
+    jr c, .movingDown
+    ; Ball is moving up because y speed is negative
+    add hl, bc
+    ; Check if new position is beyond the top of the screen
+    ld a, h
+    cp 220  ; Arbitrary large number so we can detect underflow
+    jr c, .saveYPosition
+    ; Invert the y speed, and set the y position equal to the top of the screen
+    call InvertBC
+    ; bc now contains inverted y speed
+    ld a, c
+    ld [wBallYSpeed], a
+    ld a, b
+    ld [wBallYSpeed + 1], a
+    ld hl, $0000
+    jr .saveYPosition
+.movingDown
+    ; Ball is moving down because y speed is positive
+    add hl, bc
+    ; Check if new position is beyond the bottom of the screen
+    ld a, h
+    cp 144
+    jr c, .saveYPosition
+    ; Invert the y speed, and set the y position equal to the bottom of the screen 
+    call InvertBC
+    ; bc now contains inverted y speed
+    ld a, c
+    ld [wBallYSpeed], a
+    ld a, b
+    ld [wBallYSpeed + 1], a
+    ld h, 144
+    ld l, 0
+.saveYPosition
+    ld a, l
+    ld [wBallY], a
+    ld a, h
+    ld [wBallY + 1], a
+    ret
+
+UpdateBallXPosition:
+    ld a, [wBallX]
+    ld l, a
+    ld a, [wBallX + 1]
+    ld h, a  ; hl contains ball's x position
+    ld a, [wBallXSpeed]
+    ld c, a
+    ld a, [wBallXSpeed + 1]
+    ld b, a  ; bc contains ball's x speed
+    cp $80
+    jr c, .movingRight
+    ; Ball is moving left because x speed is negative
+    add hl, bc
+    ; Check if it hit the player's wall
+    ld a, h
+    cp 220 ; Arbitrary large number to check for underflow
+    jr c, .notTouchingLeftWall
+    ; Computer scored a point!
+    ; TODO: just resetting the position for now.
+    call InitBall
+    ret
+.notTouchingLeftWall
+    ; Check if the ball is hitting the player's paddle
+    ld a, h
+    sub 4
+    cp 4
+    jr c, .saveXPosition
+    cp 8
+    jr nc, .saveXPosition
+    ld a, [wBallY + 1]
+    ld e, a
+    ld a, [wPlayerY + 1]
+    cp e
+    jr nc, .saveXPosition
+    ld d, a
+    ld a, [wPlayerHeight]
+    add d
+    cp e
+    jr c, .saveXPosition
+    ; Ball is hitting player's paddle
+    ; Invert the x speed, and set the x position equal to the right side of player's paddle
+    call InvertBC
+    ; bc now contains inverted x speed
+    ld a, c
+    ld [wBallXSpeed], a
+    ld a, b
+    ld [wBallXSpeed + 1], a
+    ld hl, $0800
+    jr .saveXPosition
+.movingRight
+    add hl, bc
+    ; Check if it hit the computer's wall
+    ld a, h
+    cp 160 ; Pixel position of right-side wall
+    jr c, .notTouchingRightWall
+    ; Player scored a point!
+    ; TODO: just resetting the position for now.
+    call InitBall
+    ret
+.notTouchingRightWall
+    ; Check if the ball is hitting the computer's paddle
+
+.saveXPosition
+    ld a, l
+    ld [wBallX], a
+    ld a, h
+    ld [wBallX + 1], a
+    ret
+
+InvertBC:
+; Inverts the 16-bit value in bc
+    ld a, b
+    cpl
+    ld b, a
+    ld a, c
+    cpl
+    ld c, a
+    inc c
+    ret nz
+    inc b
+    ret
+
 WaitForNextFrame:
     ld hl, VBlankFlag
     xor a
@@ -270,6 +485,7 @@ RunGame:
 ; Main game loop.
     call WaitForNextFrame
     call MovePlayerPaddle
+    call MoveBall
     jr RunGame
 
 MovePlayerPaddle:
