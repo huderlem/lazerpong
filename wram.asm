@@ -34,3 +34,7 @@ wBallYSpeed::
 wBallXSpeed::
     ds 2
 
+wPlayerScore::
+    ds 1
+wComputerScore::
+    ds 1

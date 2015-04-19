@@ -87,6 +87,7 @@ Start: ; 0x150
 
     call WriteDMACodeToHRAM
 
+    call ResetScores
     call InitPlayerPaddle
     call InitComputerPaddle
     call InitBall
@@ -225,6 +226,12 @@ ReadJoypad:
     cpl  ; a contains currently-pressed buttons
     ld [hJoypadState], a
     ret
+
+ResetScores:
+    xor a
+    ld hl, wPlayerScore
+    ld [hli], a
+    ld [hl], a
 
 InitPlayerPaddle:
 ; Initializes the player's paddle.
@@ -484,6 +491,9 @@ UpdateBallXPosition:
     jr c, .notTouchingLeftWall
     ; Computer scored a point!
     ; TODO: just resetting the position for now.
+    ld a, [wComputerScore]
+    inc a
+    ld [wComputerScore], a
     call InitBall
     ret
 .notTouchingLeftWall
@@ -522,6 +532,9 @@ UpdateBallXPosition:
     jr c, .notTouchingRightWall
     ; Player scored a point!
     ; TODO: just resetting the position for now.
+    ld a, [wPlayerScore]
+    inc a
+    ld [wPlayerScore], a
     call InitBall
     ret
 .notTouchingRightWall
