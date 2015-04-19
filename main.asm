@@ -88,6 +88,7 @@ Start: ; 0x150
     call WriteDMACodeToHRAM
 
     call InitPlayerPaddle
+    call InitComputerPaddle
     call InitBall
 
     ld a, $93
@@ -104,6 +105,7 @@ VBlankInterruptHandler:
     push hl
     call ReadJoypad
     call DrawPlayerPaddle
+    call DrawComputerPaddle
     ; Draw OAM sprites
     call DrawBall
     call $ff80  ; OAM DMA transfer
@@ -235,6 +237,17 @@ InitPlayerPaddle:
     ld [wPlayerHeight], a
     ret
 
+InitComputerPaddle:
+; Initializes the computer's paddle.
+    ld hl, wComputerY
+    ld a, $00
+    ld [hli], a
+    ld a, $77
+    ld [hl], a
+    ld a, $18
+    ld [wComputerHeight], a
+    ret
+
 DrawPlayerPaddle:
 ; Draws the player's paddle to the screen.
 ; This also fills in blank tiles along the column where the player's paddle doesn't overlap.
@@ -272,6 +285,69 @@ DrawPlayerPaddle:
     ld [hl], a  ; Draw the top tile
     inc d
     ld a, [wPlayerHeight]
+    sub e
+.drawMiddleTiles
+    add hl, bc
+    cp a, 8
+    jr c, .drawBottomTile
+    sub 8
+    ld [hl], $10  ; Tile id of the solid paddle tile.
+    inc d
+    jr .drawMiddleTiles
+.drawBottomTile
+    and a
+    jr z, .clearRemainingTiles
+    add $18
+    ld [hl], a
+    inc d
+    ld a, d
+.clearRemainingTiles
+    cp 18 ; number of rows in the display
+    jr z, .done
+    add hl, bc
+    ld [hl], $01  ; blank tile
+    inc a
+    jr .clearRemainingTiles
+.done
+    ret
+
+DrawComputerPaddle:
+; Draws the computer's paddle to the screen.
+; This also fills in blank tiles along the column where the computer's paddle doesn't overlap.
+    ld a, [wComputerY + 1]
+    push af
+    srl a
+    srl a
+    srl a  ; Divide by 8 to get the tile index we need to start drawing at.
+    hlCoord 019, 0, vBGMap0
+    ld bc, $0020
+    ld d, $00  ; Count which tile row we're on.
+.addLoop
+    ld [hl], $01
+    and a
+    jr z, .gotHLCoord
+    inc d
+    add hl, bc  ; Move the HL Coord down one row of tiles.
+    dec a
+    jr .addLoop
+.gotHLCoord
+    pop af  ; Reload computer's paddle Y position
+    and $7  ; Get the pixel offset in the tile. (Tiles are 8 pixels wide)
+    jr z, .save8
+    push af
+    ld e, a
+    ld a, 8
+    sub e
+    ld e, a
+    pop af
+    jr .drawTile
+.save8
+    ld e, 8
+.drawTile
+    add $10  ; a now contains tile id for the top tile
+    ld [hl], a  ; Draw the top tile
+    inc d
+    ld a, [wComputerHeight]
     sub e
 .drawMiddleTiles
     add hl, bc
@@ -436,7 +512,7 @@ UpdateBallXPosition:
     ld [wBallXSpeed], a
     ld a, b
     ld [wBallXSpeed + 1], a
-    ld hl, $0800
+    ld hl, $0c00
     jr .saveXPosition
 .movingRight
     add hl, bc
@@ -450,7 +526,31 @@ UpdateBallXPosition:
     ret
 .notTouchingRightWall
     ; Check if the ball is hitting the computer's paddle
-
+    ld a, h
+    add 4
+    cp 152
+    jr c, .saveXPosition
+    cp 156
+    jr nc, .saveXPosition
+    ld a, [wBallY + 1]
+    ld e, a
+    ld a, [wComputerY + 1]
+    cp e
+    jr nc, .saveXPosition
+    ld d, a
+    ld a, [wComputerHeight]
+    add d
+    cp e
+    jr c, .saveXPosition
+    ; Ball is hitting computer's paddle
+    ; Invert the x speed, and set the x position equal to the left side of computer's paddle
+    call InvertBC
+    ; bc now contains inverted x speed
+    ld a, c
+    ld [wBallXSpeed], a
+    ld a, b
+    ld [wBallXSpeed + 1], a
+    ld hl, $9400
 .saveXPosition
     ld a, l
     ld [wBallX], a
@@ -485,6 +585,7 @@ RunGame:
 ; Main game loop.
     call WaitForNextFrame
     call MovePlayerPaddle
+    call MoveComputerPaddle
     call MoveBall
     jr RunGame
 
@@ -535,6 +636,12 @@ MovePlayerPaddle:
     ld [wPlayerY], a
     ld a, h
     ld [wPlayerY + 1], a
+    ret
+
+MoveComputerPaddle:
+    ld a, [wBallY + 1]
+    sub 8
+    ld [wComputerY + 1], a
     ret
 
 
