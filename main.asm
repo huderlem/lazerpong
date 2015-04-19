@@ -78,6 +78,9 @@ Start: ; 0x150
     ld a, %11100100
     ld [rBGP], a  ; Set Background palette
 
+    call ClearOAMBuffer
+    call ClearBackground
+
     ld sp, $dfff  ; Initialize stack pointer to end of working RAM
 
     call InitPlayerPaddle
@@ -90,8 +93,18 @@ Start: ; 0x150
     jp RunGame
 
 VBlankInterruptHandler:
+    push af
+    push bc
+    push de
+    push hl
     call ReadJoypad
     call DrawPlayerPaddle
+    ld a, 1
+    ld [VBlankFlag], a
+    pop hl
+    pop de
+    pop bc
+    pop af
     reti
 
 TimerInterruptHandler:
@@ -101,9 +114,8 @@ SerialInterruptHandler:
     reti
 
 ClearData:
-; Clears bc bytes starting at hl.
+; Clears bc bytes starting at hl with value in a.
 ; bc can be a maximum of $7fff, since it checks bit 7 of b when looping.
-    xor a
     dec bc
 .clearLoop
     ld [hli], a
@@ -114,20 +126,17 @@ ClearData:
 
 ClearOAMBuffer::
 ; Fills OAM buffer memory with $0.
+    xor a
     ld hl, wOAMBuffer
     ld bc, $a0  ; size of OAM buffer
     jp ClearData
 
 ClearBackground::
-; Fills Background memory with $0.
-    xor a
-    ld hl,wOAMBuffer
-    ld b,$a0  ; size of OAM memory
-.loop
-    ld [hli],a
-    dec b
-    jr nz,.loop
-    ret
+; Fills Background memory with $1.
+    ld a, 1
+    ld hl, vBGMap0
+    ld bc,$800  ; size of background memory
+    jp ClearData
 
 LoadTiles:
 ; This loads tile data into VRAM. It waits for the LCD H-Blank to copy the data 4 bytes at a time.
@@ -180,7 +189,7 @@ InitPlayerPaddle:
     ld [hli], a
     ld a, $17
     ld [hl], a
-    ld a, $3
+    ld a, $18
     ld [wPlayerHeight], a
     ret
 
@@ -247,9 +256,70 @@ DrawPlayerPaddle:
 .done
     ret
 
+WaitForNextFrame:
+    ld hl, VBlankFlag
+    xor a
+    ld [hl], a
+.wait
+    ld a, [hl]
+    and a
+    jr z, .wait
+    ret
+
 RunGame:
 ; Main game loop.
+    call WaitForNextFrame
+    call MovePlayerPaddle
     jr RunGame
+
+MovePlayerPaddle:
+; Moves the player's paddle up/down based on the buttons being pressed.
+    ld a, [hJoypadState]
+    bit BIT_D_UP, a
+    jr nz, .pressingUp
+    bit BIT_D_DOWN, a
+    ret z
+    ; pressing Down
+    ld a, [wPlayerY]
+    ld l, a
+    ld a, [wPlayerY + 1]
+    ld h, a
+    ld bc, BASE_PADDLE_DOWN_SPEED
+    add hl, bc
+    push hl
+    ; Check if the new paddle position is hitting the bottom of the screen
+    ld a, [wPlayerHeight]
+    add h
+    cp 144 + 1  ; Bottom of the screen (pixels)
+    pop hl
+    jr c, .savePosition
+    ; Set the paddle's position so it's touching the bottom of the screen
+    sub h
+    ld b, a  ; Save paddle height into b
+    ld a, 144
+    sub b
+    ld h, a
+    ld l, 0
+    jr .savePosition
+.pressingUp
+    ld a, [wPlayerY]
+    ld l, a
+    ld a, [wPlayerY + 1]
+    ld h, a
+    ld bc, BASE_PADDLE_UP_SPEED
+    add hl, bc
+    ; Check if the new paddle position it hitting the top of the screen
+    ld a, h
+    cp 220  ; Arbitrary large number. We're just checking if the y position had underflow.
+    jr c, .savePosition
+    ; Set the paddle's position so it's touching the top of the screen
+    ld hl, $0000
+.savePosition
+    ld a, l
+    ld [wPlayerY], a
+    ld a, h
+    ld [wPlayerY + 1], a
+    ret
 
 
 SECTION "Bank 1",ROMX,BANK[$1]

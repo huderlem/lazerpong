@@ -27,3 +27,6 @@
 # converted image data
 *.1bpp
 *.2bpp
+
+# emulator files
+*.sn*
