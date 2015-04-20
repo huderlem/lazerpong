@@ -89,7 +89,9 @@ Start: ; 0x150
 
     call ResetScores
     call InitPlayerPaddle
+    call InitPlayerLasers
     call InitComputerPaddle
+    call InitComputerLasers
     call InitBall
 
     ld a, $93
@@ -108,7 +110,9 @@ VBlankInterruptHandler:
     call DrawPlayerPaddle
     call DrawComputerPaddle
     ; Draw OAM sprites
+    call ClearOAMBuffer
     call DrawBall
+    call DrawLasers
     call $ff80  ; OAM DMA transfer
     ld a, 1
     ld [VBlankFlag], a
@@ -244,6 +248,13 @@ InitPlayerPaddle:
     ld [wPlayerHeight], a
     ret
 
+InitPlayerLasers:
+; Initializes the player's lasers.
+    xor a
+    ld hl, wPlayerLasers
+    ld bc, 5 * MAX_LASERS
+    call ClearData
+
 InitComputerPaddle:
 ; Initializes the computer's paddle.
     ld hl, wComputerY
@@ -254,6 +265,13 @@ InitComputerPaddle:
     ld a, $18
     ld [wComputerHeight], a
     ret
+
+InitComputerLasers:
+; Initializes the Computer's lasers.
+    xor a
+    ld hl, wComputerLasers
+    ld bc, 5 * MAX_LASERS
+    call ClearData
 
 DrawPlayerPaddle:
 ; Draws the player's paddle to the screen.
@@ -317,6 +335,42 @@ DrawPlayerPaddle:
     jr .clearRemainingTiles
 .done
     ret
+
+DrawLasers:
+; Loads the player's and the computer's laser sprites into the OAM buffer.
+    ld hl, wLasers
+    ld de, wLaserSprites    ; OAM buffer destination for laser sprites
+    ld b, 1 + (MAX_LASERS * 2)  ; We're drawing both the player's and the computer's lasers
+.loop
+    dec b
+    ret z
+    ld a, [hli]  ; check if laser is active
+    and a
+    jr nz, .activeLaser
+    ; Laser is inactive, so don't draw it
+    push bc
+    ld bc, $0004
+    add hl, bc  ; Move to next laser struct
+    pop bc
+    jr .loop
+.activeLaser
+    inc hl  ; Skip over the low byte of the y position
+    ld a, [hli]  ; y position (high byte)
+    add 16 - 4  ; adjust for sprite screen offset (and center the sprite)
+    ld [de], a
+    inc de
+    inc hl  ; Skip over the low byte of the x position
+    ld a, [hli]  ; x position (high byte)
+    add 8 - 4  ; adjust for sprite screen offset (and center the sprite)
+    ld [de], a
+    inc de
+    ld a, $0  ; Laser tile id
+    ld [de], a
+    inc de
+    ld a, %00000000  ; sprite attributes
+    ld [de], a
+    inc de
+    jr .loop
 
 DrawComputerPaddle:
 ; Draws the computer's paddle to the screen.
@@ -413,7 +467,7 @@ DrawBall:
     ld [hli], a
     ld a, $0  ; tile id for ball's sprite
     ld [hli], a
-    ld a, %10000000
+    ld a, %00000000
     ld [hl], a
     ret
 
@@ -584,6 +638,216 @@ InvertBC:
     inc b
     ret
 
+MoveLasers:
+; Updates laser positions according to their speeds.
+    call MovePlayerLasers
+    jp MoveComputerLasers
+
+MovePlayerLasers:
+    ld hl, wPlayerLasers
+    ld b, MAX_LASERS + 1
+.loop
+    dec b
+    ret z
+    ld a, [hli]
+    and a
+    jr nz, .activeLaser
+    inc hl
+    inc hl
+    inc hl
+    inc hl  ; Move to next laser struct
+    jr .loop
+.activeLaser
+    inc hl
+    inc hl
+    push hl  ; Save pointer to y position
+    ld a, [hli]
+    ld e, a
+    ld a, [hl]
+    ld d, a  ; de contains laser x position
+    ld hl, BASE_LASER_SPEED_RIGHT
+    add hl, de
+    ld d, h
+    ld e, l
+    pop hl
+    ld a, e
+    ld [hli], a
+    ld a, d
+    ld [hli], a
+    jr .loop
+
+MoveComputerLasers:
+    ld hl, wComputerLasers
+    ld b, MAX_LASERS + 1
+.loop
+    dec b
+    ret z
+    ld a, [hli]
+    and a
+    jr nz, .activeLaser
+    inc hl
+    inc hl
+    inc hl
+    inc hl  ; Move to next laser struct
+    jr .loop
+.activeLaser
+    inc hl
+    inc hl
+    push hl  ; Save pointer to y position
+    ld a, [hli]
+    ld e, a
+    ld a, [hl]
+    ld d, a  ; de contains laser x position
+    ld hl, BASE_LASER_SPEED_LEFT
+    add hl, de
+    ld d, h
+    ld e, l
+    pop hl
+    ld a, e
+    ld [hli], a
+    ld a, d
+    ld [hli], a
+    jr .loop
+
+ShootLasers:
+    call ShootPlayerLasers
+    ret
+
+ShootPlayerLasers:
+; If player is pressing "shoot" button, fire a laser.
+    ld a, [hJoypadState]
+    bit BIT_A_BUTTON, a
+    jr z, .done
+    ld a, [wPlayerLaserCooldown]
+    and a
+    jr nz, .done
+    ld hl, wPlayerLasers
+    ld b, MAX_LASERS + 1
+    ; Loop to find the first inactive laser, if there is one
+.loop
+    dec b
+    jr z, .done  ; Maximum number of lasers are currently in play
+    ld a, [hl]
+    and a
+    jr z, .foundInactiveLaser
+    ; Check the next laser
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    jr .loop
+.foundInactiveLaser
+    ld a, 1
+    ld [hli], a  ; Set laser state to "active"
+    ; Set laser's position in front of the player's paddle
+    xor a
+    ld [hli], a  ; Set low byte of laser's y position
+    ld a, [wPlayerY + 1]
+    ld c, a
+    ld a, [wPlayerHeight]
+    srl a
+    add c  ; a is now the y-midpoint of the player's paddle
+    ld [hli], a
+    xor a
+    ld [hli], a
+    ld a, $10
+    ld [hli], a  ; Set the laser's x position just to the right of the player's paddle
+    ; Player has to wait awhile before firing another laser
+    ld a, LASER_COOLDOWN
+    ld [wPlayerLaserCooldown], a
+    ret
+.done
+    ; Decrement the cooldown counter
+    ld a, [wPlayerLaserCooldown]
+    and a
+    ret z
+    dec a
+    ld [wPlayerLaserCooldown], a
+    ret
+
+HandleLaserCollisions:
+    call HandlePlayerLaserCollisions
+    ret
+
+HandlePlayerLaserCollisions:
+    ld hl, wPlayerLasers
+    ld b, MAX_LASERS + 1
+.loop
+    dec b
+    ret z
+    ld a, [hli]
+    and a
+    jr nz, .activeLaser
+    inc hl
+    inc hl
+    inc hl
+    inc hl  ; Move to next laser struct
+    jr .loop
+.activeLaser
+    ; Check if laser is past the computer's wall
+    inc hl
+    inc hl
+    inc hl
+    ld a, [hl]  ; X position (high byte)
+    cp 164
+    jr c, .checkForPaddle
+    ; Set laser to inactive
+    push hl
+    dec hl
+    dec hl
+    dec hl
+    dec hl
+    xor a
+    ld [hl], a
+    pop hl
+    inc hl
+    jr .loop
+.checkForPaddle
+    ; a contains x position
+    cp 156
+    jr nc, .continue
+    cp 152
+    jr c, .continue
+    dec hl
+    dec hl
+    ld a, [hl]  ; high byte of laser's y position
+    ld c, a
+    ld a, [wComputerY + 1]
+    cp c
+    inc hl
+    inc hl
+    jr nc, .continue
+    ld d, a
+    ld a, [wComputerHeight]
+    add d
+    cp c
+    jr c, .continue
+    ; Laser is colliding with computer's paddle
+    push hl
+    dec hl
+    dec hl
+    dec hl
+    dec hl
+    xor a
+    ld [hli], a  ; Deactive laser
+    call LaserHitComputerPaddle
+    pop hl
+.continue
+    inc hl
+    jr .loop
+
+LaserHitComputerPaddle:
+; Shrink the paddle.
+    ld a, [wComputerHeight]
+    sub 4
+    cp MIN_PADDLE_HEIGHT
+    jr nc, .done
+    ld a, MIN_PADDLE_HEIGHT
+.done
+    ld [wComputerHeight], a
+    ret
+
 WaitForNextFrame:
     ld hl, VBlankFlag
     xor a
@@ -599,7 +863,10 @@ RunGame:
     call WaitForNextFrame
     call MovePlayerPaddle
     call MoveComputerPaddle
+    call ShootLasers
+    call MoveLasers
     call MoveBall
+    call HandleLaserCollisions
     jr RunGame
 
 MovePlayerPaddle:
