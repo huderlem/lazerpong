@@ -711,6 +711,7 @@ MoveComputerLasers:
 
 ShootLasers:
     call ShootPlayerLasers
+    call ShootComputerLasers
     ret
 
 ShootPlayerLasers:
@@ -766,9 +767,59 @@ ShootPlayerLasers:
     ld [wPlayerLaserCooldown], a
     ret
 
+ShootComputerLasers:
+; TODO: Do some logic to determine if computer should shoot a laser
+    ld a, [wComputerLaserCooldown]
+    and a
+    jr nz, .done
+    ld hl, wComputerLasers
+    ld b, MAX_LASERS + 1
+    ; Loop to find the first inactive laser, if there is one
+.loop
+    dec b
+    jr z, .done  ; Maximum number of lasers are currently in play
+    ld a, [hl]
+    and a
+    jr z, .foundInactiveLaser
+    ; Check the next laser
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    jr .loop
+.foundInactiveLaser
+    ld a, 1
+    ld [hli], a  ; Set laser state to "active"
+    ; Set laser's position in front of the computer's paddle
+    xor a
+    ld [hli], a  ; Set low byte of laser's y position
+    ld a, [wComputerY + 1]
+    ld c, a
+    ld a, [wComputerHeight]
+    srl a
+    add c  ; a is now the y-midpoint of the computer's paddle
+    ld [hli], a
+    xor a
+    ld [hli], a
+    ld a, $90
+    ld [hli], a  ; Set the laser's x position just to the left of the computer's paddle
+    ; Computer has to wait awhile before firing another laser
+    ld a, LASER_COOLDOWN
+    ld [wComputerLaserCooldown], a
+    ret
+.done
+    ; Decrement the cooldown counter
+    ld a, [wComputerLaserCooldown]
+    and a
+    ret z
+    dec a
+    ld [wComputerLaserCooldown], a
+    ret
+
 HandleLaserCollisions:
     call HandlePlayerLaserCollisions
-    ret
+    jp HandleComputerLaserCollisions
 
 HandlePlayerLaserCollisions:
     ld hl, wPlayerLasers
@@ -830,7 +881,7 @@ HandlePlayerLaserCollisions:
     dec hl
     dec hl
     xor a
-    ld [hli], a  ; Deactive laser
+    ld [hli], a  ; Deactivate laser
     call LaserHitComputerPaddle
     pop hl
 .continue
@@ -839,13 +890,107 @@ HandlePlayerLaserCollisions:
 
 LaserHitComputerPaddle:
 ; Shrink the paddle.
+    ld a, [wComputerY + 1]
+    ld b, a
     ld a, [wComputerHeight]
     sub 4
+    inc b
+    inc b
     cp MIN_PADDLE_HEIGHT
     jr nc, .done
+    dec b
+    dec b
     ld a, MIN_PADDLE_HEIGHT
 .done
     ld [wComputerHeight], a
+    ld a, b
+    ld [wComputerY + 1], a
+    ret
+
+HandleComputerLaserCollisions:
+    ld hl, wComputerLasers
+    ld b, MAX_LASERS + 1
+.loop
+    dec b
+    ret z
+    ld a, [hli]
+    and a
+    jr nz, .activeLaser
+    inc hl
+    inc hl
+    inc hl
+    inc hl  ; Move to next laser struct
+    jr .loop
+.activeLaser
+    ; Check if laser is past the computer's wall
+    inc hl
+    inc hl
+    inc hl
+    ld a, [hl]  ; X position (high byte)
+    cp 252
+    jr c, .checkForPaddle
+    ; Set laser to inactive
+    push hl
+    dec hl
+    dec hl
+    dec hl
+    dec hl
+    xor a
+    ld [hl], a
+    pop hl
+    inc hl
+    jr .loop
+.checkForPaddle
+    ; a contains x position
+    cp 4
+    jr c, .continue
+    cp 8
+    jr nc, .continue
+    dec hl
+    dec hl
+    ld a, [hl]  ; high byte of laser's y position
+    ld c, a
+    ld a, [wPlayerY + 1]
+    cp c
+    inc hl
+    inc hl
+    jr nc, .continue
+    ld d, a
+    ld a, [wPlayerHeight]
+    add d
+    cp c
+    jr c, .continue
+    ; Laser is colliding with player's paddle
+    push hl
+    dec hl
+    dec hl
+    dec hl
+    dec hl
+    xor a
+    ld [hli], a  ; Deactivate laser
+    call LaserHitPlayerPaddle
+    pop hl
+.continue
+    inc hl
+    jr .loop
+
+LaserHitPlayerPaddle:
+; Shrink the paddle.
+    ld a, [wPlayerY + 1]
+    ld b, a
+    ld a, [wPlayerHeight]
+    sub 4
+    inc b
+    inc b
+    cp MIN_PADDLE_HEIGHT
+    jr nc, .done
+    dec b
+    dec b
+    ld a, MIN_PADDLE_HEIGHT
+.done
+    ld [wPlayerHeight], a
+    ld a, b
+    ld [wPlayerY + 1], a
     ret
 
 WaitForNextFrame:
