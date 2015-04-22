@@ -364,7 +364,7 @@ DrawLasers:
     add 8 - 4  ; adjust for sprite screen offset (and center the sprite)
     ld [de], a
     inc de
-    ld a, $0  ; Laser tile id
+    ld a, $2  ; Laser tile id
     ld [de], a
     inc de
     ld a, %00000000  ; sprite attributes
@@ -836,6 +836,61 @@ HandlePlayerLaserCollisions:
     inc hl  ; Move to next laser struct
     jr .loop
 .activeLaser
+    push hl
+    ; Check if laser is moving the opposite direction of the pong ball
+    ld a, [wBallXSpeed + 1]
+    cp $80
+    jr c, .checkForWall
+    ; Check if laser is hitting the pong ball
+    inc hl
+    ld a, [hl]  ; Y position of laser (high byte)
+    ld c, a
+    ld a, [wBallY + 1]
+    cp c
+    jr c, .laserYIsGreater
+    sub c
+    jr .gotYDifference
+.laserYIsGreater
+    ld d, a
+    ld a, c
+    sub d
+.gotYDifference
+    ; a contains difference between laser and ball y coordinates
+    cp 7  ; TODO: make this a constant
+    jr nc, .checkForWall
+    inc hl
+    inc hl
+    ld a, [hl]  ; X position of laser (high byte)
+    ld c, a
+    ld a, [wBallX + 1]
+    cp c
+    jr c, .laserXIsGreater
+    sub c
+    jr .gotXDifference
+.laserXIsGreater
+    ld d, a
+    ld a, c
+    sub d
+.gotXDifference
+    ; a contains difference between laser and ball x coordinates
+    cp 7  ; TODO: make this a constant
+    jr nc, .checkForWall
+    ; Laser is hitting ball!
+    ; Deactivate laser and change the ball's direction/speed
+    pop hl
+    dec hl
+    xor a
+    ld [hl], a  ; deactivate laser
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    call IncreaseBallYSpeed
+    call FlipBallDirection
+    jr .loop
+.checkForWall
+    pop hl
     ; Check if laser is past the computer's wall
     inc hl
     inc hl
@@ -886,7 +941,7 @@ HandlePlayerLaserCollisions:
     pop hl
 .continue
     inc hl
-    jr .loop
+    jp .loop
 
 LaserHitComputerPaddle:
 ; Shrink the paddle.
@@ -991,6 +1046,63 @@ LaserHitPlayerPaddle:
     ld [wPlayerHeight], a
     ld a, b
     ld [wPlayerY + 1], a
+    ret
+
+FlipBallDirection:
+; Flips the x speed of the ball
+    ld a, [wBallXSpeed]
+    ld c, a
+    ld a, [wBallXSpeed + 1]
+    ld b, a
+    call InvertBC
+    ld a, c
+    ld [wBallXSpeed], a
+    ld a, b
+    ld [wBallXSpeed + 1], a
+    ret
+
+IncreaseBallYSpeed:
+; Makes ball's y speed faster
+    ld a, [wBallYSpeed]
+    ld c, a
+    ld a, [wBallYSpeed + 1]
+    ld b, a
+    cp $80
+    jr c, .movingDown
+    ; ball is moving upward
+    ld a, c
+    sub BALL_Y_SPEED_DELTA
+    jr nc, .noCarry
+    dec b
+.noCarry
+    ld c, a
+    ; bc is new speed
+    ld a, b
+    cp MIN_Y_SPEED
+    jr nc, .saveSpeed
+    ld b, MIN_Y_SPEED
+    ld c, 0
+    jr .saveSpeed
+.movingDown
+    ; ball is moving downward
+    ld a, c
+    add BALL_Y_SPEED_DELTA
+    jr nc, .noCarry2
+    inc b
+.noCarry2
+    ld c, a
+    ; bc is new speed
+    ld a, b
+    cp MAX_Y_SPEED
+    jr c, .saveSpeed
+    ld b, MAX_Y_SPEED
+    ld c, 0
+.saveSpeed
+    ; bc is the Y speed to save
+    ld a, c
+    ld [wBallYSpeed], a
+    ld a, b
+    ld [wBallYSpeed + 1], a
     ret
 
 WaitForNextFrame:
