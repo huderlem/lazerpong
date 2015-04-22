@@ -24,9 +24,5 @@
 # url: http://www.vim.org/scripts/script.php?script_id=441
 .lvimrc
 
-# converted image data
-*.1bpp
-*.2bpp
-
 # emulator files
 *.sn*
