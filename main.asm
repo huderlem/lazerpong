@@ -107,6 +107,7 @@ VBlankInterruptHandler:
     push de
     push hl
     call ReadJoypad
+    call DrawScore
     call DrawPlayerPaddle
     call DrawComputerPaddle
     ; Draw OAM sprites
@@ -272,6 +273,36 @@ InitComputerLasers:
     ld hl, wComputerLasers
     ld bc, 5 * MAX_LASERS
     call ClearData
+
+DrawScore:
+; Draws the score of the game.
+    ld a, [wPlayerScore]
+    cp 10
+    jr c, .oneDigit
+    push af
+    ld a, $21
+    hlCoord 2, 3, vBGMap0
+    ld [hl], a
+    pop af
+    sub 10
+.oneDigit
+    add $20  ; base tile id for numbers
+    hlCoord 3, 3, vBGMap0
+    ld [hl], a
+    ld a, [wComputerScore]
+    cp 10
+    jr c, .oneDigit2
+    push af
+    ld a, $21
+    hlCoord 16, 3, vBGMap0
+    ld [hl], a
+    pop af
+    sub 10
+.oneDigit2
+    add $20  ; base tile id for numbers
+    hlCoord 17, 3, vBGMap0
+    ld [hl], a
+    ret
 
 DrawPlayerPaddle:
 ; Draws the player's paddle to the screen.
@@ -977,6 +1008,61 @@ HandleComputerLaserCollisions:
     inc hl  ; Move to next laser struct
     jr .loop
 .activeLaser
+    push hl
+    ; Check if laser is moving the opposite direction of the pong ball
+    ld a, [wBallXSpeed + 1]
+    cp $80
+    jr nc, .checkForWall
+    ; Check if laser is hitting the pong ball
+    inc hl
+    ld a, [hl]  ; Y position of laser (high byte)
+    ld c, a
+    ld a, [wBallY + 1]
+    cp c
+    jr c, .laserYIsGreater
+    sub c
+    jr .gotYDifference
+.laserYIsGreater
+    ld d, a
+    ld a, c
+    sub d
+.gotYDifference
+    ; a contains difference between laser and ball y coordinates
+    cp 7  ; TODO: make this a constant
+    jr nc, .checkForWall
+    inc hl
+    inc hl
+    ld a, [hl]  ; X position of laser (high byte)
+    ld c, a
+    ld a, [wBallX + 1]
+    cp c
+    jr c, .laserXIsGreater
+    sub c
+    jr .gotXDifference
+.laserXIsGreater
+    ld d, a
+    ld a, c
+    sub d
+.gotXDifference
+    ; a contains difference between laser and ball x coordinates
+    cp 7  ; TODO: make this a constant
+    jr nc, .checkForWall
+    ; Laser is hitting ball!
+    ; Deactivate laser and change the ball's direction/speed
+    pop hl
+    dec hl
+    xor a
+    ld [hl], a  ; deactivate laser
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    inc hl
+    call IncreaseBallYSpeed
+    call FlipBallDirection
+    jr .loop
+.checkForWall
+    pop hl
     ; Check if laser is past the computer's wall
     inc hl
     inc hl
@@ -1027,7 +1113,7 @@ HandleComputerLaserCollisions:
     pop hl
 .continue
     inc hl
-    jr .loop
+    jp .loop
 
 LaserHitPlayerPaddle:
 ; Shrink the paddle.
