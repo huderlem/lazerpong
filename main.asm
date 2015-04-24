@@ -188,6 +188,13 @@ ClearBackground:
     ld bc,$800  ; size of background memory
     jp ClearData
 
+ClearLasers:
+; Deletes all lasers
+    xor a
+    ld hl, wLasers
+    ld bc, (MAX_LASERS * 2 * 5)
+    jp ClearData
+
 LoadTiles:
 ; This loads tile data into VRAM. It waits for the LCD H-Blank to copy the data 4 bytes at a time.
 ; input:  hl = source of tile data
@@ -487,6 +494,60 @@ InitBall:
     ld [hl], a
     ret
 
+PlayerScorePoint:
+    ld a, [wPlayerScore]
+    inc a
+    ld [wPlayerScore], a
+    ld a, START_PLAY_TIME
+    ld [wStartPlayTimer], a
+    call InitBall
+    ld hl, wBallY
+    xor a
+    ld [hli], a
+    ld a, BASE_BALL_Y_POSITION
+    ld [hli], a
+    xor a
+    ld [hli], a
+    ld a, BASE_BALL_X_POSITION
+    ld [hli], a
+    ld a, (BASE_BALL_Y_SPEED & $ff)
+    ld [hli], a
+    ld a, (BASE_BALL_Y_SPEED >> 8)
+    ld [hli], a
+    ld a, (BASE_BALL_X_SPEED_NEGATIVE & $ff)
+    ld [hli], a
+    ld a, (BASE_BALL_X_SPEED_NEGATIVE >> 8)
+    ld [hl], a
+    call ClearLasers
+    ret
+
+ComputerScorePoint:
+    ld a, [wComputerScore]
+    inc a
+    ld [wComputerScore], a
+    ld a, START_PLAY_TIME
+    ld [wStartPlayTimer], a
+    call InitBall
+    ld hl, wBallY
+    xor a
+    ld [hli], a
+    ld a, BASE_BALL_Y_POSITION
+    ld [hli], a
+    xor a
+    ld [hli], a
+    ld a, BASE_BALL_X_POSITION
+    ld [hli], a
+    ld a, (BASE_BALL_Y_SPEED & $ff)
+    ld [hli], a
+    ld a, (BASE_BALL_Y_SPEED >> 8)
+    ld [hli], a
+    ld a, (BASE_BALL_X_SPEED & $ff)
+    ld [hli], a
+    ld a, (BASE_BALL_X_SPEED >> 8)
+    ld [hl], a
+    call ClearLasers
+    ret
+
 DrawBall:
 ; Draws the Pong ball sprite to OAM.
     ld hl, wBallSprite
@@ -575,11 +636,7 @@ UpdateBallXPosition:
     cp 220 ; Arbitrary large number to check for underflow
     jr c, .notTouchingLeftWall
     ; Computer scored a point!
-    ; TODO: just resetting the position for now.
-    ld a, [wComputerScore]
-    inc a
-    ld [wComputerScore], a
-    call InitBall
+    call ComputerScorePoint
     ret
 .notTouchingLeftWall
     ; Check if the ball is hitting the player's paddle
@@ -616,11 +673,7 @@ UpdateBallXPosition:
     cp 160 ; Pixel position of right-side wall
     jr c, .notTouchingRightWall
     ; Player scored a point!
-    ; TODO: just resetting the position for now.
-    ld a, [wPlayerScore]
-    inc a
-    ld [wPlayerScore], a
-    call InitBall
+    call PlayerScorePoint
     ret
 .notTouchingRightWall
     ; Check if the ball is hitting the computer's paddle
@@ -1206,6 +1259,13 @@ RunGame:
     call WaitForNextFrame
     call MovePlayerPaddle
     call MoveComputerPaddle
+    ld a, [wStartPlayTimer]
+    and a
+    jr z, .currentlyPlaying
+    dec a
+    ld [wStartPlayTimer], a
+    jr RunGame
+.currentlyPlaying
     call ShootLasers
     call MoveLasers
     call MoveBall
