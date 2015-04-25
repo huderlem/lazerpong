@@ -16,11 +16,15 @@ wLaserSprites::
     ds 4 * MAX_LASERS
     ds 4 * (39 - MAX_LASERS)
 
+wCurrentScreen::
+    ds 1
+wScreenState::
+    ds 1
+
 wPlayerY::
     ds 2
 wPlayerHeight::
     ds 1
-
 
 wComputerY::
     ds 2

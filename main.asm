@@ -1,5 +1,6 @@
 INCLUDE "macros.asm"
 INCLUDE "constants.asm"
+INCLUDE "charmap.asm"
 
 SECTION "rst 00", ROM0 [$00]
     ret
@@ -11,7 +12,7 @@ SECTION "rst 10", ROM0 [$10]
     ret
 
 SECTION "rst 18", ROM0 [$18]
-    ret
+    jp JumpToFuncInTable
 
 SECTION "rst 20", ROM0 [$20]
     ret
@@ -74,7 +75,7 @@ Start: ; 0x150
     ld hl, GameGfx
     ld bc, $800
     ld de, vTiles0
-    call LoadTiles
+    call LoadGfx
     ld a, %11100100
     ld [rBGP], a  ; Set Background palette
     ld [rOBP0], a ; Set Sprite Palette 0
@@ -87,19 +88,34 @@ Start: ; 0x150
 
     call WriteDMACodeToHRAM
 
-    call ResetScores
-    call InitPlayerPaddle
-    call InitPlayerLasers
-    call InitComputerPaddle
-    call InitComputerLasers
-    call InitBall
+    xor a
+    ld hl, wCurrentScreen
+    ld [hli], a
+    ld [hl], a
 
     ld a, $93
     ld [rLCDC], a   ; Enable LCD Display
     ld a,%00000001  ; Enable V-blank interrupt
     ld [rIE], a
     ei
-    jp RunGame
+    jp Main
+
+JumpToFuncInTable:
+; Jumps to a function in the pointer table immediately following
+; a "rst $18" call.  Function must be in the same Bank as the pointer table.
+    sla a
+    pop hl
+    push de
+    ld e, a
+    ld d, $0
+    add hl, de
+    ld e, [hl]
+    inc hl
+    ld d, [hl]
+    ld l, e
+    ld h, d
+    pop de
+    jp [hl]
 
 VBlankInterruptHandler:
     push af
@@ -107,14 +123,7 @@ VBlankInterruptHandler:
     push de
     push hl
     call ReadJoypad
-    call DrawScore
-    call DrawPlayerPaddle
-    call DrawComputerPaddle
-    ; Draw OAM sprites
-    call ClearOAMBuffer
-    call DrawBall
-    call DrawLasers
-    call $ff80  ; OAM DMA transfer
+    call DrawCurrentScreen
     ld a, 1
     ld [VBlankFlag], a
     pop hl
@@ -122,6 +131,26 @@ VBlankInterruptHandler:
     pop bc
     pop af
     reti
+
+DrawCurrentScreen:
+    ld a, [wCurrentScreen]
+    rst $18
+DrawScreenFunctions:
+    dw DrawTitlescreen
+    dw DrawGame
+
+DrawTitlescreen:
+    jp $ff80  ; OAM DMA transfer
+
+DrawGame:
+    call DrawScore
+    call DrawPlayerPaddle
+    call DrawComputerPaddle
+    ; Draw OAM sprites
+    call ClearOAMBuffer
+    call DrawBall
+    call DrawLasers
+    jp $ff80  ; OAM DMA transfer
 
 TimerInterruptHandler:
     reti
@@ -195,10 +224,10 @@ ClearLasers:
     ld bc, (MAX_LASERS * 2 * 5)
     jp ClearData
 
-LoadTiles:
-; This loads tile data into VRAM. It waits for the LCD H-Blank to copy the data 4 bytes at a time.
-; input:  hl = source of tile data
-;         de = destination for tile data
+LoadGfx:
+; This loads data into VRAM. It waits for the LCD H-Blank to copy the data.
+; input:  hl = source of data
+;         de = destination for data
 ;         bc = number of bytes to copy
 .waitForHBlank
     ld a, [$ff41] ; LCDC Status
@@ -212,6 +241,39 @@ LoadTiles:
     or c  ; have we copied all of the data?
     jr nz, .waitForHBlank
     ret
+
+ClearGfx:
+; Clear data in VRAM. It waits for the LCD H-Blank to clear the data.
+; input:  hl = destination to clear
+;         bc = number of bytes to clear
+;          d = value to clear with
+.waitForHBlank
+    ld a, [$ff41] ; LCDC Status
+    and $3
+    jr nz, .waitForHBlank
+    ld a, d
+    ld [hli], a
+    dec bc
+    ld a, b
+    or c  ; have we cleared all of the data?
+    jr nz, .waitForHBlank
+    ret
+
+PrintText:
+; Loads text graphics.
+; input:  hl = pointer to "@"-terminated string
+;         de = destination for data
+    ld bc, $0000  ; Count number of bytes in string
+    push hl
+.loop
+    ld a, [hli]
+    cp "@"
+    jr z, .finishedProcessingString
+    inc bc
+    jr .loop
+.finishedProcessingString
+    pop hl
+    jp LoadGfx
 
 ReadJoypad:
 ; Reads the current state of the joypad and saves the state into
@@ -244,6 +306,7 @@ ResetScores:
     ld hl, wPlayerScore
     ld [hli], a
     ld [hl], a
+    ret
 
 InitPlayerPaddle:
 ; Initializes the player's paddle.
@@ -261,14 +324,14 @@ InitPlayerLasers:
     xor a
     ld hl, wPlayerLasers
     ld bc, 5 * MAX_LASERS
-    call ClearData
+    jp ClearData
 
 InitComputerPaddle:
 ; Initializes the computer's paddle.
     ld hl, wComputerY
     ld a, $00
     ld [hli], a
-    ld a, $77
+    ld a, $17
     ld [hl], a
     ld a, $18
     ld [wComputerHeight], a
@@ -279,7 +342,7 @@ InitComputerLasers:
     xor a
     ld hl, wComputerLasers
     ld bc, 5 * MAX_LASERS
-    call ClearData
+    jp ClearData
 
 DrawScore:
 ; Draws the score of the game.
@@ -500,6 +563,8 @@ PlayerScorePoint:
     ld [wPlayerScore], a
     ld a, START_PLAY_TIME
     ld [wStartPlayTimer], a
+    call InitPlayerPaddle
+    call InitComputerPaddle
     call InitBall
     ld hl, wBallY
     xor a
@@ -519,6 +584,7 @@ PlayerScorePoint:
     ld a, (BASE_BALL_X_SPEED_NEGATIVE >> 8)
     ld [hl], a
     call ClearLasers
+    call CheckForGameFinished
     ret
 
 ComputerScorePoint:
@@ -527,6 +593,8 @@ ComputerScorePoint:
     ld [wComputerScore], a
     ld a, START_PLAY_TIME
     ld [wStartPlayTimer], a
+    call InitPlayerPaddle
+    call InitComputerPaddle
     call InitBall
     ld hl, wBallY
     xor a
@@ -546,6 +614,29 @@ ComputerScorePoint:
     ld a, (BASE_BALL_X_SPEED >> 8)
     ld [hl], a
     call ClearLasers
+    call CheckForGameFinished
+    ret
+
+CheckForGameFinished:
+    ld a, [wComputerScore]
+    cp POINTS_TO_WIN
+    jr c, .checkPlayer
+    ; Computer won the game
+    ; TODO: do stuff when game is won
+    xor a
+    ld [wScreenState], a
+    ld a, SCREEN_TITLESCREEN
+    ld [wCurrentScreen], a
+    ret
+.checkPlayer
+    ld a, [wPlayerScore]
+    cp POINTS_TO_WIN
+    ret c
+    ; Player won the game
+    xor a
+    ld [wScreenState], a
+    ld a, SCREEN_TITLESCREEN
+    ld [wCurrentScreen], a
     ret
 
 DrawBall:
@@ -836,7 +927,7 @@ ShootPlayerLasers:
     ld [hli], a
     xor a
     ld [hli], a
-    ld a, $10
+    ld a, $a
     ld [hli], a  ; Set the laser's x position just to the right of the player's paddle
     ; Player has to wait awhile before firing another laser
     ld a, LASER_COOLDOWN
@@ -886,7 +977,7 @@ ShootComputerLasers:
     ld [hli], a
     xor a
     ld [hli], a
-    ld a, $90
+    ld a, $96
     ld [hli], a  ; Set the laser's x position just to the left of the computer's paddle
     ; Computer has to wait awhile before firing another laser
     ld a, LASER_COOLDOWN
@@ -1254,7 +1345,87 @@ WaitForNextFrame:
     jr z, .wait
     ret
 
+Main:
+; Master control loop for the game.
+    call RunCurrentScreen
+    jr Main
+
+RunCurrentScreen:
+    ld a, [wCurrentScreen]
+    rst $18  ; Call function in the following pointer table
+ScreenFunctions:
+    dw RunTitlescreen  ; SCREEN_TITLESCREEN
+    dw RunGame         ; SCREEN_GAME
+
+RunTitlescreen:
+    ld a, [wScreenState]
+    rst $18
+TitlescreenFunctions:
+    dw LoadTitlescreenGraphics
+    dw MainTitlescreen
+
+LoadTitlescreenGraphics:
+    ld d, 1
+    ld hl, vBGMap0
+    ld bc, $400
+    call ClearGfx
+    call ClearOAMBuffer
+    hlCoord 5, 8, vBGMap0
+    ld d, h
+    ld e, l
+    ld hl, TitlescreenMainText
+    call PrintText
+    ; advance to next titlescreen state
+    ld a, 1
+    ld [wScreenState], a
+    ret
+
+TitlescreenMainText:
+    db "LAZERPONG@"
+
+MainTitlescreen:
+; Main titlescreen loop.
+; Go to the game when player pressed START or A
+    ld a, [hJoypadState]
+    bit BIT_A_BUTTON, a
+    jr nz, .exitTitlescreen
+    bit BIT_START, a
+    jr z, .stayOnTitlescreen
+.exitTitlescreen
+    xor a
+    ld [wScreenState], a
+    ld a, SCREEN_GAME
+    ld [wCurrentScreen], a
+    ret
+.stayOnTitlescreen
+    jr MainTitlescreen
+
 RunGame:
+    ld a, [wScreenState]
+    rst $18
+GameFunctions:
+    dw InitGame
+    dw GameLoop
+
+InitGame:
+; Initializes paddles, lasers, ball, etc.
+    call ResetScores
+    call InitPlayerPaddle
+    call InitPlayerLasers
+    call InitComputerPaddle
+    call InitComputerLasers
+    call InitBall
+    ld a, START_PLAY_TIME
+    ld [wStartPlayTimer], a
+    ld d, 1
+    ld hl, vBGMap0
+    ld bc, $400
+    call ClearGfx
+    ld a, 1
+    ld [wScreenState], a  ; Advance to GameLoop state
+    ret
+
+GameLoop:
 ; Main game loop.
     call WaitForNextFrame
     call MovePlayerPaddle
@@ -1264,13 +1435,13 @@ RunGame:
     jr z, .currentlyPlaying
     dec a
     ld [wStartPlayTimer], a
-    jr RunGame
+    ret
 .currentlyPlaying
     call ShootLasers
     call MoveLasers
     call MoveBall
     call HandleLaserCollisions
-    jr RunGame
+    ret
 
 MovePlayerPaddle:
 ; Moves the player's paddle up/down based on the buttons being pressed.
