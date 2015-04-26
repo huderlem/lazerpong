@@ -742,19 +742,19 @@ UpdateBallXPosition:
     ld a, h
     sub 4
     cp 4
-    jr c, .saveXPosition
+    jp c, .saveXPosition
     cp 8
-    jr nc, .saveXPosition
+    jp nc, .saveXPosition
     ld a, [wBallY + 1]
     ld e, a
     ld a, [wPlayerY + 1]
     cp e
-    jr nc, .saveXPosition
+    jp nc, .saveXPosition
     ld d, a
     ld a, [wPlayerHeight]
     add d
     cp e
-    jr c, .saveXPosition
+    jp c, .saveXPosition
     ; Ball is hitting player's paddle
     ; Invert the x speed, and set the x position equal to the right side of player's paddle.
     ; Also set the x speed to its base speed.
@@ -763,6 +763,33 @@ UpdateBallXPosition:
     ld [wBallXSpeed], a
     ld a, b
     ld [wBallXSpeed + 1], a
+    ; Increase or decrease y speed based on where it hit the paddle
+    ld a, [wBallY + 1]
+    ld b, a
+    ld a, [wPlayerY + 1]
+    ld c, a
+    ld a, [wPlayerHeight]
+    srl a
+    add c  ; a is midpoint of player's paddle
+    cp b
+    jr c, .bottomOfPlayerPaddle
+    ; ball is hitting top half of player's paddle
+    ld a, [wBallYSpeed + 1]
+    cp $80
+    jr c, .decreaseBallYSpeed
+    jr .increaseBallYSpeed
+.bottomOfPlayerPaddle
+    ; ball is hitting bottom half of player's paddle
+    ld a, [wBallYSpeed + 1]
+    cp $80
+    jr c, .increaseBallYSpeed
+    jr .decreaseBallYSpeed
+.increaseBallYSpeed
+    call IncreaseBallYSpeed
+    jr .doneChangingYSpeed
+.decreaseBallYSpeed
+    call DecreaseBallYSpeed
+.doneChangingYSpeed
     ld hl, $0c00
     jr .saveXPosition
 .movingRight
@@ -800,6 +827,33 @@ UpdateBallXPosition:
     ld [wBallXSpeed], a
     ld a, b
     ld [wBallXSpeed + 1], a
+    ; Increase or decrease y speed based on where it hit the paddle
+    ld a, [wBallY + 1]
+    ld b, a
+    ld a, [wComputerY + 1]
+    ld c, a
+    ld a, [wComputerHeight]
+    srl a
+    add c  ; a is midpoint of Computer's paddle
+    cp b
+    jr c, .bottomOfComputerPaddle
+    ; ball is hitting top half of Computer's paddle
+    ld a, [wBallYSpeed + 1]
+    cp $80
+    jr c, .decreaseBallYSpeed2
+    jr .increaseBallYSpeed2
+.bottomOfComputerPaddle
+    ; ball is hitting bottom half of Computer's paddle
+    ld a, [wBallYSpeed + 1]
+    cp $80
+    jr c, .increaseBallYSpeed2
+    jr .decreaseBallYSpeed2
+.increaseBallYSpeed2
+    call IncreaseBallYSpeed
+    jr .doneChangingYSpeed2
+.decreaseBallYSpeed2
+    call DecreaseBallYSpeed
+.doneChangingYSpeed2
     ld hl, $9400
 .saveXPosition
     ld a, l
@@ -1299,6 +1353,40 @@ FlipBallDirection:
     ld [wBallXSpeed], a
     ld a, b
     ld [wBallXSpeed + 1], a
+    ret
+
+DecreaseBallYSpeed:
+; Makes ball's y speed slower
+    ld a, [wBallYSpeed]
+    ld c, a
+    ld a, [wBallYSpeed + 1]
+    ld b, a
+    cp $80
+    jr c, .movingDown
+    ; ball is moving upward
+    ld a, c
+    add BALL_Y_SPEED_DELTA
+    jr nc, .noCarry
+    inc b
+.noCarry
+    ld c, a
+    ; bc is new speed
+    ld a, b
+    jr .saveSpeed
+.movingDown
+    ; ball is moving downward
+    ld a, c
+    sub BALL_Y_SPEED_DELTA
+    jr nc, .noCarry2
+    dec b
+.noCarry2
+    ld c, a
+.saveSpeed
+    ; bc is new speed
+    ld a, c
+    ld [wBallYSpeed], a
+    ld a, b
+    ld [wBallYSpeed + 1], a
     ret
 
 IncreaseBallYSpeed:
