@@ -1,4 +1,5 @@
 charmap "@", $0  ; terminator. Can't print this character. Marks the end of strings.
+charmap " ", $1
 
 charmap "0", $20
 charmap "1", $21

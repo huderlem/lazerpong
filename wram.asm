@@ -61,6 +61,10 @@ wPlayerScore::
     ds 1
 wComputerScore::
     ds 1
+wWinner::
+; 1 = player won game
+; 2 = computer won game
+    ds 1
 
 wStartPlayTimer::
 ; Counts down to zero before a new ball is started.

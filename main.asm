@@ -138,6 +138,7 @@ DrawCurrentScreen:
 DrawScreenFunctions:
     dw DrawTitlescreen
     dw DrawGame
+    dw DrawGameOver
 
 DrawTitlescreen:
     jp $ff80  ; OAM DMA transfer
@@ -150,6 +151,9 @@ DrawGame:
     call ClearOAMBuffer
     call DrawBall
     call DrawLasers
+    jp $ff80  ; OAM DMA transfer
+
+DrawGameOver:
     jp $ff80  ; OAM DMA transfer
 
 TimerInterruptHandler:
@@ -623,9 +627,11 @@ CheckForGameFinished:
     jr c, .checkPlayer
     ; Computer won the game
     ; TODO: do stuff when game is won
+    ld a, 2  ; computer won
+    ld [wWinner], a
     xor a
     ld [wScreenState], a
-    ld a, SCREEN_TITLESCREEN
+    ld a, SCREEN_GAME_OVER
     ld [wCurrentScreen], a
     ret
 .checkPlayer
@@ -633,9 +639,11 @@ CheckForGameFinished:
     cp POINTS_TO_WIN
     ret c
     ; Player won the game
+    ld a, 1  ; player won
+    ld [wWinner], a
     xor a
     ld [wScreenState], a
-    ld a, SCREEN_TITLESCREEN
+    ld a, SCREEN_GAME_OVER
     ld [wCurrentScreen], a
     ret
 
@@ -748,9 +756,9 @@ UpdateBallXPosition:
     cp e
     jr c, .saveXPosition
     ; Ball is hitting player's paddle
-    ; Invert the x speed, and set the x position equal to the right side of player's paddle
-    call InvertBC
-    ; bc now contains inverted x speed
+    ; Invert the x speed, and set the x position equal to the right side of player's paddle.
+    ; Also set the x speed to its base speed.
+    ld bc, BASE_BALL_X_SPEED
     ld a, c
     ld [wBallXSpeed], a
     ld a, b
@@ -785,9 +793,9 @@ UpdateBallXPosition:
     cp e
     jr c, .saveXPosition
     ; Ball is hitting computer's paddle
-    ; Invert the x speed, and set the x position equal to the left side of computer's paddle
-    call InvertBC
-    ; bc now contains inverted x speed
+    ; Invert the x speed, and set the x position equal to the left side of computer's paddle.
+    ; Also set the x speed to its base speed.
+    ld bc, BASE_BALL_X_SPEED_NEGATIVE
     ld a, c
     ld [wBallXSpeed], a
     ld a, b
@@ -1062,6 +1070,7 @@ HandlePlayerLaserCollisions:
     inc hl
     inc hl
     call IncreaseBallYSpeed
+    call IncreaseBallXSpeed
     call FlipBallDirection
     jr .loop
 .checkForWall
@@ -1203,6 +1212,7 @@ HandleComputerLaserCollisions:
     inc hl
     inc hl
     call IncreaseBallYSpeed
+    call IncreaseBallXSpeed
     call FlipBallDirection
     jr .loop
 .checkForWall
@@ -1335,6 +1345,50 @@ IncreaseBallYSpeed:
     ld [wBallYSpeed + 1], a
     ret
 
+IncreaseBallXSpeed:
+; Makes ball's x speed faster
+    ld a, [wBallXSpeed]
+    ld c, a
+    ld a, [wBallXSpeed + 1]
+    ld b, a
+    cp $80
+    jr c, .movingRight
+    ; Ball is moving left
+    ld a, c
+    sub BALL_X_SPEED_DELTA
+    jr nc, .noCarry
+    dec b
+.noCarry
+    ld c, a
+    ; bc is new x speed
+    ld a, b
+    cp MIN_X_SPEED
+    jr nc, .saveSpeed
+    ld b, MIN_X_SPEED
+    ld c, 0
+    jr .saveSpeed
+.movingRight
+    ; ball is moving right
+    ld a, c
+    add BALL_X_SPEED_DELTA
+    jr nc, .noCarry2
+    inc b
+.noCarry2
+    ld c, a
+    ; bc is new speed
+    ld a, b
+    cp MAX_X_SPEED
+    jr c, .saveSpeed
+    ld b, MAX_X_SPEED
+    ld c, 0
+.saveSpeed
+    ; bc is the X speed to save
+    ld a, c
+    ld [wBallXSpeed], a
+    ld a, b
+    ld [wBallXSpeed + 1], a
+    ret
+
 WaitForNextFrame:
     ld hl, VBlankFlag
     xor a
@@ -1356,6 +1410,7 @@ RunCurrentScreen:
 ScreenFunctions:
     dw RunTitlescreen  ; SCREEN_TITLESCREEN
     dw RunGame         ; SCREEN_GAME
+    dw RunGameOver     ; SCREEN_GAME_OVER
 
 RunTitlescreen:
     ld a, [wScreenState]
@@ -1498,6 +1553,63 @@ MoveComputerPaddle:
     ld [wComputerY + 1], a
     ret
 
+RunGameOver:
+; Display the winner of the game.
+    ld d, 1
+    ld hl, vBGMap0
+    ld bc, $400
+    call ClearGfx
+    call ClearOAMBuffer
+    ld a, [wWinner]
+    cp 2
+    jr z, .computerWon
+    ; player won
+    hlCoord 5, 8, vBGMap0
+    ld d, h
+    ld e, l
+    ld hl, PlayerWonText
+    call PrintText
+    hlCoord 3, 10, vBGMap0
+    ld d, h
+    ld e, l
+    ld hl, PlayerWonText2
+    call PrintText
+    jr .loadedGraphics
+.computerWon
+    hlCoord 5, 8, vBGMap0
+    ld d, h
+    ld e, l
+    ld hl, ComputerWonText
+    call PrintText
+    hlCoord 3, 10, vBGMap0
+    ld d, h
+    ld e, l
+    ld hl, ComputerWonText2
+    call PrintText
+.loadedGraphics
+    ; wait for a few seconds, then return to titlescreen
+    ld b, 240  ; 240 frames
+.waitLoop
+    call WaitForNextFrame
+    dec b
+    jr nz, .waitLoop
+    xor a
+    ld [wScreenState], a
+    ld a, SCREEN_TITLESCREEN
+    ld [wCurrentScreen], a
+    ret
+
+PlayerWonText:
+    db "PLAYER WON@"
+
+PlayerWonText2:
+    db "COMPUTER IS BAD@"
+
+ComputerWonText:
+    db "COMPUTER WON@"
+
+ComputerWonText2:
+    db "PLAYER IS BAD@"
 
 SECTION "Bank 1",ROMX,BANK[$1]
 
