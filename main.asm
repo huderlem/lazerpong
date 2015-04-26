@@ -1056,7 +1056,8 @@ ShootComputerLasers:
 
 HandleLaserCollisions:
     call HandlePlayerLaserCollisions
-    jp HandleComputerLaserCollisions
+    call HandleComputerLaserCollisions
+    jp HandleLaserPairCollisions
 
 HandlePlayerLaserCollisions:
     ld hl, wPlayerLasers
@@ -1476,6 +1477,123 @@ IncreaseBallXSpeed:
     ld a, b
     ld [wBallXSpeed + 1], a
     ret
+
+HandleLaserPairCollisions:
+; Checks every pair of active lasers.
+; If two lasers are colliding, disable them both.
+    ld hl, wPlayerLasers
+    ld a, MAX_LASERS
+    ld [wScratch], a
+.loopPlayerLasers
+    ld a, [wScratch]
+    dec a
+    cp $ff  ; check for underflow
+    ret z  ; return if we're done checking all of player's lasers
+    ld [wScratch], a
+    ; Check if laser is enabled
+    ld a, [hl]
+    and a
+    jr nz, .checkComputerLasers
+    ; Player laser is disabled, move the to the next one
+    ld bc, 5
+    add hl, bc
+    jr .loopPlayerLasers
+.checkComputerLasers
+    ; Check all of the computer lasers for collision
+    ld de, wComputerLasers
+    ld a, MAX_LASERS
+    ld [wScratch2], a
+    push hl  ; save player laser pointer
+.loopComputerLasers
+    ld a, [wScratch2]
+    dec a
+    cp $ff  ; check for underflow
+    ld [wScratch2], a
+    jr nz, .checkEnabled
+    ; advance to next player laser
+    pop hl  ; pop player laser position
+    ld bc, 5
+    add hl, bc
+    jr .loopPlayerLasers
+.checkEnabled
+    ; Check if computer laser is enabled
+    ld a, [de]
+    and a
+    jr nz, .computerLaserEnabled
+    ; advance to next computer laser
+    inc de
+    inc de
+    inc de
+    inc de
+    inc de
+    jr .loopComputerLasers
+.computerLaserEnabled
+    inc hl
+    inc hl
+    inc de
+    inc de
+    ; hl = high byte of player laser y position 
+    ; de = high byte of computer laser y position
+    ld a, [de]
+    ld b, a
+    ld a, [hl]
+    cp b
+    jr c, .playerIsLess
+    ; computer's laser is above the player's laser
+    sub b
+    jr .gotYDifference
+.playerIsLess
+    ; player's laser is above the computer's laser
+    ld c, a
+    ld a, b
+    sub c
+.gotYDifference
+    ; a = y pixel difference
+    cp 5
+    jr c, .checkForXDifference
+    ; advance to next computer laser
+    dec hl
+    dec hl
+    inc de
+    inc de
+    inc de
+    jr .loopComputerLasers
+.checkForXDifference
+    ; Check for x difference
+    inc hl
+    inc hl
+    inc de
+    inc de
+    ; hl = high byte of player laser x position
+    ; de = high byte of computer laser x position
+    ld a, [hl]
+    ld b, a
+    ld a, [de]
+    sub b
+    cp 5
+    jr c, .lasersColliding
+    ; advance to next computer laser
+    dec hl
+    dec hl
+    dec hl
+    dec hl
+    inc de
+    jr .loopComputerLasers
+.lasersColliding
+    ; disable both lasers
+    ; de = high byte of computer laser x position
+    pop hl  ; pop player laser enabled byte
+    dec de
+    dec de
+    dec de
+    dec de
+    xor a
+    ld [hl], a
+    ld [de], a
+    ; advance to next player laser
+    ld bc, 5
+    add hl, bc
+    jr .loopPlayerLasers
 
 WaitForNextFrame:
     ld hl, VBlankFlag

@@ -69,3 +69,9 @@ wWinner::
 wStartPlayTimer::
 ; Counts down to zero before a new ball is started.
     ds 1
+
+; Scratch registers
+wScratch::
+    ds 1
+wScratch2::
+    ds 1
