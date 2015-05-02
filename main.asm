@@ -1757,10 +1757,91 @@ MovePlayerPaddle:
     ret
 
 MoveComputerPaddle:
-    ld a, [wBallY + 1]
-    sub 8
+    ; If ball is moving away from computer, move towards middle.
+    ; Else, move towards ball.
+    ld a, [wBallXSpeed + 1]
+    cp $80
+    jr c, .movingTowardsComputer
+    ; ball is moving away computer
+    ld a, [wComputerY + 1]
+    ld b, a
+    ld a, [wComputerHeight]
+    srl a
+    add b
+    cp $48
+    jr c, .aboveHalf
+    sub $48
+    jr .gotDiff
+.aboveHalf
+    ld b, a
+    ld a, $48
+    sub b
+.gotDiff
+    cp $4
+    ret c
+    ld a, [wComputerY + 1]
+    ld b, a
+    ld a, [wComputerHeight]
+    srl a
+    add b
+    cp $48
+    jr c, .upperHalf
+    ; computer paddle is in lower half, so move up
+.moveUp
+    ld a, [wComputerY]
+    ld l, a
+    ld a, [wComputerY + 1]
+    ld h, a
+    ld bc, BASE_PADDLE_UP_SPEED
+    add hl, bc
+    ld a, h
+    cp 220  ; arbitrary large number to check for underflow
+    jr c, .noUnderflow
+    xor a
+    ld h, a
+    ld l, a
+.noUnderflow
+    ld a, l
+    ld [wComputerY], a
+    ld a, h
     ld [wComputerY + 1], a
     ret
+.upperHalf
+    ; computer paddle is in upper half, so move down
+.moveDown
+    ld a, [wComputerY]
+    ld l, a
+    ld a, [wComputerY + 1]
+    ld h, a
+    ld bc, BASE_PADDLE_DOWN_SPEED
+    add hl, bc
+    ld a, [wPlayerHeight]
+    add h
+    cp 144 + 1  ; Bottom of the screen (pixels)
+    jr c, .noOverflow
+    sub h
+    ld b, a  ; Save paddle height into b
+    ld a, 144
+    sub b
+    ld h, a
+    ld l, 0
+.noOverflow
+    ld a, l
+    ld [wComputerY], a
+    ld a, h
+    ld [wComputerY + 1], a
+    ret
+.movingTowardsComputer
+    ld a, [wComputerY + 1]
+    ld b, a
+    ld a, [wComputerHeight]
+    srl a
+    add b
+    ld b, a ; b = computer paddle middle y position
+    ld a, [wBallY + 1]
+    cp b
+    jr c, .moveUp
+    jr .moveDown
 
 RunGameOver:
 ; Display the winner of the game.
