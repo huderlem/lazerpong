@@ -1634,10 +1634,15 @@ LoadTitlescreenGraphics:
     ld bc, $400
     call ClearGfx
     call ClearOAMBuffer
-    hlCoord 5, 8, vBGMap0
+    hlCoord 5, 7, vBGMap0
     ld d, h
     ld e, l
     ld hl, TitlescreenMainText
+    call PrintText
+    hlCoord 4, 12, vBGMap0
+    ld d, h
+    ld e, l
+    ld hl, AuthorText
     call PrintText
     ; advance to next titlescreen state
     ld a, 1
@@ -1646,6 +1651,9 @@ LoadTitlescreenGraphics:
 
 TitlescreenMainText:
     db "LAZERPONG@"
+
+AuthorText:
+    db "BY SHANTYTOWN@"
 
 MainTitlescreen:
 ; Main titlescreen loop.
@@ -1854,7 +1862,7 @@ RunGameOver:
     cp 2
     jr z, .computerWon
     ; player won
-    hlCoord 5, 8, vBGMap0
+    hlCoord 3, 8, vBGMap0
     ld d, h
     ld e, l
     ld hl, PlayerWonText
@@ -1866,7 +1874,7 @@ RunGameOver:
     call PrintText
     jr .loadedGraphics
 .computerWon
-    hlCoord 5, 8, vBGMap0
+    hlCoord 3, 8, vBGMap0
     ld d, h
     ld e, l
     ld hl, ComputerWonText
